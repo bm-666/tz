@@ -2,11 +2,17 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 import csv
+
+from rest_framework.response import Response
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
 application = get_wsgi_application()
-
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, BasePermission, IsAdminUser
 from rest_framework import serializers
+from rest_framework import status
+
 from coin.models import *
 from datetime import date, datetime
 from typing import Any
@@ -17,6 +23,7 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
 
 class UserPrizeSerializer(serializers.Serializer):
     player = serializers.CharField(required=True)
@@ -41,39 +48,60 @@ class BaseResponse:
         if data is not None:
             self.data = data
 
+
+class IsApp(BasePermission):
+    """Реализация прав приложения"""
+    def has_permission(self, request, view):
+        if request.role == 'app':
+            return True
 # Задание 2-1
-def give_prize(request: Request) -> BaseResponse:
+
+def _give_prize(data: dict):
+    try:
+        level = Level.objects.get(title=data.get('level'))
+        PlayerLevel.objects.create(
+            player=Player.objects.get(player_id=data.get('player')),
+            level=level,
+            is_completed=True,
+            completed=date.today(),
+            score=data.get('score')
+        )
+        LevelPrize.objects.create(
+            level=level,
+            prize=Prize.objects.get(title=data.get('prize')),
+            received=date.today()
+
+        )
+        return BaseResponse(status_code=StatusCode.SUCCESS)
+    except Exception as error:
+        logger.exception(error.args)
+        return BaseResponse(status_code=StatusCode.ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsApp])
+def give_prize(request: Request) -> Response:
     """
     метод выдачи приза игроку
     :param request :type Request
     :return обьект :type BaseResponse
     """
-    data = request.data
+    data: dict = request.data
     serializer_data = UserPrizeSerializer(data=data)
 
     if serializer_data.is_valid():
-        data = serializer_data.data
-        try:
-            level = Level.objects.get(title=data.get('level'))
-            PlayerLevel.objects.create(
-                player=Player.objects.get(player_id=data.get('player')),
-                level = level,
-                is_completed=True,
-                completed=date.today(),
-                score=data.get('score')
-            )
-            LevelPrize.objects.create(
-                level=level,
-                prize=Prize.objects.get(title=data.get('prize')),
-                received = date.today()
+        data:BaseResponse = _give_prize(serializer_data.data)
 
-                )
-            return BaseResponse(status_code=StatusCode.SUCCESS)
-        except Exception as error:
-            logger.exception(error.args)
-            return BaseResponse(status_code=StatusCode.ERROR)
+        if data.status_code == StatusCode.SUCCESS:
+            return Response(status=status.HTTP_201_CREATED)
+        elif data.status_code == StatusCode.ERROR:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        elif data.status_code == StatusCode.INCORRECT_DATA:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
     else:
-        return BaseResponse(status_code=StatusCode.INCORRECT_DATA)
+
+        return Response(status=status.HTTP_400_BAD_REQUEST)
 
 # Задание 2-2
 
@@ -114,7 +142,9 @@ def _user_level_info() -> list[dict]:
         list_to_csv += player_levels
     return list_to_csv
 
-def export_to_csv() -> None:
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def export_to_csv(request: Request) -> Response:
     """"Метод выгрузки в данных в файл .csv"""
     try:
         user_level_info = _user_level_info()
@@ -124,7 +154,8 @@ def export_to_csv() -> None:
 
             for item in user_level_info:
                 writer.writerow(item)
+        return Response(status=status.HTTP_200_OK)
 
     except Exception as e:
         logger.exception(f'{e.__class__} : {e.args}')
-        raise
+        return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
