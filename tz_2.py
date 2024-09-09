@@ -111,17 +111,12 @@ class UserLevelInfo:
     is_completed: bool
     prize: str
 
-    def __init__(
-            self,
-            id: int,
-            level: str,
-            is_completed: bool,
-            prize: str) -> None:
+    def __init__(self, data) -> None:
 
-        self.id = id
-        self.level = level
-        self.is_completed = is_completed
-        self.prize = prize
+        self.id = data.id
+        self.level = data.level
+        self.is_completed = data.is_completed
+        self.prize = data.level.levelprize_set.select_related('prize')[0].prize.title if data.is_completed else ''
 
 def _user_level_info() -> list[dict]:
     """метод выгрузки данных согласно тестового задания
@@ -131,12 +126,7 @@ def _user_level_info() -> list[dict]:
     players = Player.objects.select_related()
     for player in players:
         player_levels = [
-            UserLevelInfo(
-                id=item.id,
-                level=item.level.title,
-                is_completed=item.is_completed,
-                prize=item.level.levelprize_set.select_related('prize')[0].prize.title if item.is_completed else ''
-            ).__dict__
+            UserLevelInfo(item).__dict__
             for item in player.playerlevel_set.select_related()
         ]
         list_to_csv += player_levels
@@ -159,3 +149,5 @@ def export_to_csv(request: Request) -> Response:
     except Exception as e:
         logger.exception(f'{e.__class__} : {e.args}')
         return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#-----------------------------------------
